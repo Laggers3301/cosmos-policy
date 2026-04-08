@@ -74,7 +74,6 @@ from typing import Optional
 import draccus
 import h5py
 import numpy as np
-import robosuite
 import torch
 import wandb
 from robocasa.utils.dataset_registry import MULTI_STAGE_TASK_DATASETS, SINGLE_STAGE_TASK_DATASETS
@@ -332,6 +331,15 @@ def create_robocasa_env(cfg: PolicyEvalConfig, seed=None, episode_idx=None):
 
     with open(CONTROLLER_CONFIGS_PATH, "rb") as pickle_file:
         controller_configs = pickle.load(pickle_file)
+    # Resolve offscreen rendering GPU id.
+    # When CUDA_VISIBLE_DEVICES exposes a single GPU (e.g. "7"), MuJoCo/EGL often expects the
+    # *visible index* (0..N-1) rather than the physical id. Force device_id=0 in that case.
+    render_gpu_device_id = getattr(cfg, "render_gpu_device_id", -1)
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if cuda_visible != "":
+        visible_list = [x.strip() for x in cuda_visible.split(",") if x.strip() != ""]
+        if len(visible_list) == 1:
+            render_gpu_device_id = 0
     # Create environment
     # We use the same args used in the official RoboCasa evals (robocasa/utils/eval_utils.py)
     env_kwargs = dict(
@@ -343,6 +351,9 @@ def create_robocasa_env(cfg: PolicyEvalConfig, seed=None, episode_idx=None):
         camera_heights=cfg.env_img_res,
         has_renderer=False,
         has_offscreen_renderer=True,
+        # Offscreen EGL rendering device. Default -1 lets the backend decide, but when CUDA_VISIBLE_DEVICES
+        # exposes a single GPU, some setups require an explicit 0 here. Guided eval sets this on cfg.
+        render_gpu_device_id=render_gpu_device_id,
         ignore_done=True,
         use_object_obs=True,
         use_camera_obs=True,
@@ -354,6 +365,10 @@ def create_robocasa_env(cfg: PolicyEvalConfig, seed=None, episode_idx=None):
         layout_and_style_ids=layout_and_style_ids,
         translucent_robot=False,
     )
+    # Lazy import robosuite so MUJOCO_GL / MUJOCO_EGL_DEVICE_ID set by callers (e.g. guided eval)
+    # can take effect before robosuite initializes its rendering backend.
+    import robosuite
+
     env = robosuite.make(**env_kwargs)
     return env, env_kwargs
 

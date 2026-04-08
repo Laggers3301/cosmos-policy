@@ -89,7 +89,7 @@ def _policy_video_vae(
     device="cpu",
     s3_credential_path: str = "credentials/s3_training.secret",
     load_mean_std=False,
-    mean_std_path: str = "hf://nvidia/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
+    mean_std_path: str = "/workspace/data1/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
     **kwargs,
 ):
     """
@@ -205,10 +205,10 @@ class CosmosPolicyWanVAE:
     def __init__(
         self,
         z_dim=16,
-        vae_pth="hf://nvidia/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
+        vae_pth="/workspace/data1/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
         s3_credential_path: str = "credentials/s3_training.secret",
         load_mean_std=False,
-        mean_std_path: str = "hf://nvidia/Cosmos-Predict2-2B-Video2World/tokenizer/mean_std.pt",
+        mean_std_path: str = "/workspace/data1/Cosmos-Predict2-2B-Video2World/tokenizer/mean_std.pt",
         dtype=torch.bfloat16,
         device="cuda",
         is_amp=True,
@@ -478,7 +478,7 @@ class Wan2pt1VAEInterface(VideoTokenizerInterface):
             load_mean_std=load_mean_std,
             vae_pth=kwargs.get(
                 "vae_pth",
-                "hf://nvidia/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
+                "/workspace/data1/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
             ),
             s3_credential_path=kwargs.get("s3_credential_path", "credentials/s3_training.secret"),
             temporal_window=kwargs.get("temporal_window", 4),

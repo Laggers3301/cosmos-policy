@@ -29,6 +29,11 @@ from cosmos_policy._src.imaginaire.utils import distributed, log, misc, wandb_ut
 from cosmos_policy._src.imaginaire.utils.callback import Callback
 from cosmos_policy._src.imaginaire.utils.easy_io import easy_io
 
+try:
+    import swanlab
+except Exception:  # pragma: no cover
+    swanlab = None
+
 
 @dataclass
 class _LossRecord:
@@ -81,6 +86,24 @@ class WandbCallback(Callback):
         self.save_s3 = save_s3
         self.wandb_extra_tag = f"@{logging_iter_multipler}" if logging_iter_multipler > 1 else ""
         self.name = "wandb_loss_log" + self.wandb_extra_tag
+        self._swanlab_enabled = self._read_bool_env("SWANLAB_ENABLED", False)
+        self._swanlab_failure_tolerant = self._read_bool_env("SWANLAB_FAILURE_TOLERANT", True)
+        self._swanlab_initialized = False
+
+    @staticmethod
+    def _read_bool_env(name: str, default: bool) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _swanlab_log(self, info: dict[str, Any], step: int) -> None:
+        if swanlab is None or not self._swanlab_initialized or not distributed.is_rank0():
+            return
+        try:
+            swanlab.log(info, step=step)
+        except Exception as exc:
+            log.warning(f"SwanLab log failed at step={step}: {exc}")
 
     @distributed.rank0_only
     def on_train_start(self, model: ImaginaireModel, iteration: int = 0) -> None:
@@ -99,6 +122,43 @@ class WandbCallback(Callback):
                 os.path.join(os.environ["SLURM_LOG_DIR"], "config.yaml"),
             )
 
+        if self._swanlab_enabled:
+            swanlab_project = os.environ.get("SWANLAB_PROJECT", config.job.project)
+            swanlab_experiment = os.environ.get("SWANLAB_EXPERIMENT", config.job.name)
+            swanlab_mode = os.environ.get("SWANLAB_MODE", "cloud")
+            swanlab_api_key = os.environ.get("SWANLAB_API_KEY", "")
+            swanlab_cfg = {
+                "project": config.job.project,
+                "group": config.job.group,
+                "name": config.job.name,
+                "path_local": config.job.path_local,
+                "logging_iter": config.trainer.logging_iter,
+            }
+            try:
+                if swanlab is None:
+                    raise RuntimeError("swanlab package is not installed")
+                if not swanlab_api_key:
+                    raise RuntimeError("SWANLAB_API_KEY is empty")
+                swanlab.login(api_key=swanlab_api_key)
+                swanlab.init(
+                    project=swanlab_project,
+                    experiment_name=swanlab_experiment,
+                    mode=swanlab_mode,
+                    config=swanlab_cfg,
+                )
+                self._swanlab_initialized = True
+                log.info(
+                    "SwanLab enabled: "
+                    f"project={swanlab_project}, experiment={swanlab_experiment}, mode={swanlab_mode}"
+                )
+            except Exception as exc:
+                self._swanlab_initialized = False
+                msg = f"SwanLab init failed: {exc}"
+                if self._swanlab_failure_tolerant:
+                    log.warning(msg)
+                else:
+                    raise RuntimeError(msg) from exc
+
     def on_before_optimizer_step(
         self,
         model_ddp: distributed.DistributedDataParallel,
@@ -116,6 +176,7 @@ class WandbCallback(Callback):
                 info[f"optim/weight_decay_{i}"] = param_group["weight_decay"]
 
             wandb.log(info, step=iteration)
+            self._swanlab_log(info, step=iteration)
 
     def on_training_step_end(
         self,
@@ -197,6 +258,7 @@ class WandbCallback(Callback):
 
                 if wandb:
                     wandb.log(info, step=iteration)
+                    self._swanlab_log(info, step=iteration)
             if self.logging_iter_multipler == 1:
                 self.trainer.training_timer.reset()
 
@@ -237,6 +299,12 @@ class WandbCallback(Callback):
         if distributed.is_rank0():
             log.info(f"Validation loss (iteration {iteration}): {loss}")
             wandb.log({"val/loss": loss}, step=iteration)
+            self._swanlab_log({"val/loss": loss}, step=iteration)
 
     def on_train_end(self, model: ImaginaireModel, iteration: int = 0) -> None:
         wandb.finish()
+        if self._swanlab_initialized and distributed.is_rank0():
+            try:
+                swanlab.finish()
+            except Exception as exc:
+                log.warning(f"SwanLab finish failed: {exc}")

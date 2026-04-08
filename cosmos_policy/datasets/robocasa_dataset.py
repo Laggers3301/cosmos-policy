@@ -78,6 +78,7 @@ class RoboCasaDataset(Dataset):
         gamma: float = 0.99,
         lazy_load_demos: bool = False,
         skip_computing_dataset_statistics: bool = False,
+        return_raw_frames_for_teacher: bool = False,
     ):
         """
         Initialize RoboCasa dataset for training.
@@ -127,6 +128,7 @@ class RoboCasaDataset(Dataset):
         self.return_value_function_returns = return_value_function_returns
         self.gamma = gamma
         self.lazy_load_demos = lazy_load_demos
+        self.return_raw_frames_for_teacher = return_raw_frames_for_teacher
 
         assert self.use_wrist_images or self.use_third_person_images, (
             "Must use at least one of wrist images or third-person images!"
@@ -1075,6 +1077,15 @@ class RoboCasaDataset(Dataset):
             "future_image2_latent_idx": future_image2_latent_idx if self.use_third_person_images else -1,
             "value_function_return": value_function_return,
         }
+
+        if self.return_raw_frames_for_teacher:
+            sample_dict["teacher_raw_frames"] = np.stack(
+                [
+                    decompressed_left_primary_images[relative_step_idx],
+                    decompressed_left_primary_images[future_frame_idx],
+                ],
+                axis=0,
+            ).astype(np.uint8)  # (2, H, W, 3)
 
         return sample_dict
 

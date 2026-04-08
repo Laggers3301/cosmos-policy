@@ -24,7 +24,7 @@ from cosmos_policy.tokenizers.wan2pt1 import Wan2pt1VAEInterface
 
 # Policy-specific wan2pt1 tokenizer with deterministic seeding
 PolicyWan2pt1VAEConfig = L(Wan2pt1VAEInterface)(
-    vae_pth="hf://nvidia/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
+    vae_pth="/workspace/data1/Cosmos-Predict2-2B-Video2World/tokenizer/tokenizer.pth",
     s3_credential_path="credentials/s3_training.secret",
     load_mean_std=False,
     temporal_window=4,

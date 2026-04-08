@@ -73,6 +73,8 @@ def replace_latent_with_action_chunk(
 
     # Flatten action_chunk (preserving batch dimension)
     flat_action = action_chunk.reshape(batch_size, -1)
+    # Defensive: avoid NaN/Inf from dataset propagating into loss
+    flat_action = torch.nan_to_num(flat_action, nan=0.0, posinf=1.0, neginf=-1.0)
     num_action_elements = flat_action.shape[1]
 
     # Calculate total elements in the target tensor (per batch)
@@ -642,8 +644,12 @@ class CosmosPolicyDiffusionModel(BaseDiffusionModel):
         )
         action_diff_demo = action_diff[rollout_data_mask == 0]
         action_diff_world_model = action_diff[world_model_sample_mask == 1]
-        demo_sample_action_mse_loss = (action_diff_demo**2).mean()
-        demo_sample_action_l1_loss = torch.abs(action_diff_demo).mean()
+        if action_diff_demo.numel() > 0:
+            demo_sample_action_mse_loss = (action_diff_demo**2).mean()
+            demo_sample_action_l1_loss = torch.abs(action_diff_demo).mean()
+        else:
+            demo_sample_action_mse_loss = torch.tensor(0.0, device=action_diff.device, dtype=action_diff.dtype)
+            demo_sample_action_l1_loss = torch.tensor(0.0, device=action_diff.device, dtype=action_diff.dtype)
         all_samples_action_mse_loss = (action_diff**2).mean()
         all_samples_action_l1_loss = torch.abs(action_diff).mean()
 
@@ -654,12 +660,24 @@ class CosmosPolicyDiffusionModel(BaseDiffusionModel):
         value_diff_demo = value_diff[rollout_data_mask == 0]
         value_diff_world_model = value_diff[world_model_sample_mask == 1]
         value_diff_value_function = value_diff[value_function_sample_mask == 1]
-        demo_sample_value_mse_loss = (value_diff_demo**2).mean()
-        demo_sample_value_l1_loss = torch.abs(value_diff_demo).mean()
-        world_model_sample_value_mse_loss = (value_diff_world_model**2).mean()
-        world_model_sample_value_l1_loss = torch.abs(value_diff_world_model).mean()
-        value_function_sample_value_mse_loss = (value_diff_value_function**2).mean()
-        value_function_sample_value_l1_loss = torch.abs(value_diff_value_function).mean()
+        if value_diff_demo.numel() > 0:
+            demo_sample_value_mse_loss = (value_diff_demo**2).mean()
+            demo_sample_value_l1_loss = torch.abs(value_diff_demo).mean()
+        else:
+            demo_sample_value_mse_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
+            demo_sample_value_l1_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
+        if value_diff_world_model.numel() > 0:
+            world_model_sample_value_mse_loss = (value_diff_world_model**2).mean()
+            world_model_sample_value_l1_loss = torch.abs(value_diff_world_model).mean()
+        else:
+            world_model_sample_value_mse_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
+            world_model_sample_value_l1_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
+        if value_diff_value_function.numel() > 0:
+            value_function_sample_value_mse_loss = (value_diff_value_function**2).mean()
+            value_function_sample_value_l1_loss = torch.abs(value_diff_value_function).mean()
+        else:
+            value_function_sample_value_mse_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
+            value_function_sample_value_l1_loss = torch.tensor(0.0, device=value_diff.device, dtype=value_diff.dtype)
         all_samples_value_mse_loss = (value_diff**2).mean()
         all_samples_value_l1_loss = torch.abs(value_diff).mean()
 

@@ -12,8 +12,9 @@
 # dir@exchange.nvidia.com.
 # -----------------------------------------------------------------------------
 
+import os
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
@@ -28,6 +29,11 @@ from cosmos_policy._src.imaginaire.utils.callback import WandBCallback as WandBC
 from cosmos_policy._src.imaginaire.utils.easy_io import easy_io
 from cosmos_policy._src.predict2.callbacks.wandb_log import _LossRecord
 
+try:
+    import swanlab
+except Exception:  # pragma: no cover
+    swanlab = None
+
 
 @dataclass
 class _LossRecordNoEDM:
@@ -39,17 +45,30 @@ class _LossRecordNoEDM:
         self.iter_count = 0
 
     def get_stat(self) -> Tuple[float, float]:
-        if self.iter_count > 0:
-            avg_loss = self.loss / self.iter_count
-            dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
-            avg_loss = avg_loss.item()
+        if not dist.is_available() or not dist.is_initialized():
+            avg_loss = (self.loss / self.iter_count).item() if self.iter_count > 0 else 0.0
+            self.reset()
+            return avg_loss
+
+        if torch.is_tensor(self.loss):
+            loss_tensor = self.loss.detach().float()
         else:
-            avg_loss = 0
+            device = torch.device("cuda", torch.cuda.current_device()) if torch.cuda.is_available() else torch.device("cpu")
+            loss_tensor = torch.tensor(float(self.loss), device=device, dtype=torch.float32)
+
+        count_tensor = torch.tensor(float(self.iter_count), device=loss_tensor.device, dtype=torch.float32)
+
+        dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(count_tensor, op=dist.ReduceOp.SUM)
+
+        avg_loss = (loss_tensor / torch.clamp(count_tensor, min=1.0)).item()
         self.reset()
         return avg_loss
 
 
 class WandbCallback(WandBCallbackImage):
+    _swanlab_global_initialized = False
+
     def __init__(
         self,
         logging_iter_multipler: int = 1,
@@ -115,6 +134,77 @@ class WandbCallback(WandBCallbackImage):
         self.save_s3 = save_s3
         self.wandb_extra_tag = f"@{logging_iter_multipler}" if logging_iter_multipler > 1 else ""
         self.name = "wandb_loss_log" + self.wandb_extra_tag
+        self._swanlab_enabled = self._read_bool_env("SWANLAB_ENABLED", False)
+        self._swanlab_failure_tolerant = self._read_bool_env("SWANLAB_FAILURE_TOLERANT", True)
+        self._swanlab_initialized = False
+        self._owns_swanlab_session = False
+
+    @staticmethod
+    def _read_bool_env(name: str, default: bool) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _swanlab_log(self, info: dict[str, Any], step: int) -> None:
+        if swanlab is None or not self._swanlab_initialized or not distributed.is_rank0():
+            return
+        try:
+            swanlab.log(info, step=step)
+        except Exception as exc:
+            log.warning(f"SwanLab log failed at step={step}: {exc}")
+
+    @distributed.rank0_only
+    def on_train_start(self, model: ImaginaireModel, iteration: int = 0) -> None:
+        super().on_train_start(model, iteration=iteration)
+        if WandbCallback._swanlab_global_initialized:
+            self._swanlab_initialized = True
+            return
+        if self._swanlab_enabled:
+            swanlab_project = os.environ.get("SWANLAB_PROJECT", self.config.job.project)
+            swanlab_experiment = os.environ.get("SWANLAB_EXPERIMENT", self.config.job.name)
+            swanlab_mode = os.environ.get("SWANLAB_MODE", "cloud")
+            swanlab_api_key = os.environ.get("SWANLAB_API_KEY", "")
+            try:
+                if swanlab is None:
+                    raise RuntimeError("swanlab package is not installed")
+                if not swanlab_api_key:
+                    raise RuntimeError("SWANLAB_API_KEY is empty")
+                swanlab.login(api_key=swanlab_api_key)
+                swanlab.init(
+                    project=swanlab_project,
+                    experiment_name=swanlab_experiment,
+                    mode=swanlab_mode,
+                    config={
+                        "job_name": self.config.job.name,
+                        "job_group": self.config.job.group,
+                        "job_project": self.config.job.project,
+                        "logging_iter": self.config.trainer.logging_iter,
+                    },
+                )
+                self._swanlab_initialized = True
+                self._owns_swanlab_session = True
+                WandbCallback._swanlab_global_initialized = True
+                log.info(
+                    "SwanLab enabled: "
+                    f"project={swanlab_project}, experiment={swanlab_experiment}, mode={swanlab_mode}"
+                )
+            except Exception as exc:
+                self._swanlab_initialized = False
+                msg = f"SwanLab init failed: {exc}"
+                if self._swanlab_failure_tolerant:
+                    log.warning(msg)
+                else:
+                    raise RuntimeError(msg) from exc
+
+    @distributed.rank0_only
+    def on_train_end(self, model: ImaginaireModel, iteration: int = 0) -> None:
+        super().on_train_end(model, iteration=iteration)
+        if self._swanlab_initialized and self._owns_swanlab_session:
+            try:
+                swanlab.finish()
+            except Exception as exc:
+                log.warning(f"SwanLab finish failed: {exc}")
 
     def on_training_step_end(
         self,
@@ -357,8 +447,9 @@ class WandbCallback(WandBCallbackImage):
                             f"s3://rundir/{self.name}/Train_Iter{iteration:09d}.json",
                         )
 
-                if wandb:
+                if wandb.run:
                     wandb.log(info, step=iteration)
+                self._swanlab_log(info, step=iteration)
             if self.logging_iter_multipler == 1:
                 self.trainer.training_timer.reset()
 
@@ -609,8 +700,9 @@ class WandbCallback(WandBCallbackImage):
                             f"s3://rundir/{self.name}/Val_Iter{iteration:09d}.json",
                         )
 
-                if wandb:
+                if wandb.run:
                     wandb.log(info, step=iteration)
+                self._swanlab_log(info, step=iteration)
 
                 log.info(f"Validation final loss (iteration {iteration}): {avg_final_loss:4f}")
 

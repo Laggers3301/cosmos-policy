@@ -14,7 +14,7 @@ cosmos-predict2>=0.1.0
 
 # Core Python libraries
 attrs>=25.4.0
-numpy>=2.0.0
+numpy>=1.26.0,<2
 pillow>=11.3.0
 
 # Deep learning frameworks (install separately for your CUDA version)

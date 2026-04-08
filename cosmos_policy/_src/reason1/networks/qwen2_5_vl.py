@@ -65,7 +65,7 @@ else:
     print("flash_attn_2 not available")
     flash_attn_varlen_func = None
 
-assert is_flash_attn_2_available(), "flash_attn_2 not available. run pip install flash_attn"
+FLASH_ATTN2_ASSERT_DISABLED = True
 
 logger = logging.get_logger(__name__)
 
@@ -376,7 +376,7 @@ class Qwen2_5_VLVisionSdpaAttention(nn.Module):
 
 QWEN2_5_VL_VISION_ATTENTION_CLASSES = {
     # "eager": Qwen2_5_VLVisionAttention,
-    "flash_attention_2": Qwen2_5_VLVisionFlashAttention2,
+    "flash_attention_2": Qwen2_5_VLVisionSdpaAttention if not is_flash_attn_2_available() else Qwen2_5_VLVisionFlashAttention2,
     "sdpa": Qwen2_5_VLVisionSdpaAttention,
 }
 
@@ -1050,7 +1050,7 @@ class Qwen2_5_VLSdpaAttention(Qwen2_5_VLAttention):
 
 QWEN2_5_VL_ATTENTION_CLASSES = {
     # "eager": Qwen2_5_VLAttention,
-    "flash_attention_2": Qwen2_5_VLFlashAttention2,
+    "flash_attention_2": Qwen2_5_VLFlashAttention2 if is_flash_attn_2_available() else Qwen2_5_VLSdpaAttention,
     "sdpa": Qwen2_5_VLSdpaAttention,
 }
 
@@ -1157,6 +1157,8 @@ class Qwen2_5_VLDecoderLayer(nn.Module):
 class Qwen2_5_VLModel(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig):
         super().__init__()
+        if getattr(config, "_attn_implementation", None) == "flash_attention_2" and not is_flash_attn_2_available():
+            config._attn_implementation = "sdpa"
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size

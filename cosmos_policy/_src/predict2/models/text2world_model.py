@@ -472,9 +472,14 @@ class DiffusionModel(ImaginaireModel):
             loss weights per sigma noise level
         """
         if "edm" == self.config.scaling:
-            return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+            denom = (sigma * self.sigma_data) ** 2
+            # Avoid div-by-zero / inf in AMP when sigma underflows to 0
+            denom = denom.clamp(min=1e-12)
+            return (sigma**2 + self.sigma_data**2) / denom
         elif "rectified_flow" == self.config.scaling:
-            return (1 + sigma) ** 2 / sigma**2
+            denom = sigma**2
+            denom = denom.clamp(min=1e-12)
+            return (1 + sigma) ** 2 / denom
         else:
             raise ValueError(f"Invalid scaling: {self.config.scaling}")
 
@@ -895,6 +900,8 @@ class DiffusionModel(ImaginaireModel):
         else:
             raise ValueError(f"sigma shape {sigma.shape} is not supported")
         sigma_B_1_T_1_1 = rearrange(sigma_B_T, "b t -> b 1 t 1 1")
+        # Avoid division-by-zero / inf in loss when sigma underflows (e.g. AMP)
+        sigma_B_1_T_1_1 = sigma_B_1_T_1_1.clamp(min=1e-7)
         # get precondition for the network
         c_skip_B_1_T_1_1, c_out_B_1_T_1_1, c_in_B_1_T_1_1, c_noise_B_1_T_1_1 = self.scaling(sigma=sigma_B_1_T_1_1)
 

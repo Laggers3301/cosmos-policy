@@ -32,6 +32,13 @@ if TYPE_CHECKING:
     from cosmos_policy._src.imaginaire.model import ImaginaireModel
 
 
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 @distributed.rank0_only
 def init_wandb(config: Config, model: ImaginaireModel) -> None:
     """Initialize Weights & Biases (wandb) logger.
@@ -46,6 +53,9 @@ def init_wandb(config: Config, model: ImaginaireModel) -> None:
         config_job = JobConfig(**config.job)
     else:
         config_job = config.job
+    if _read_bool_env("WANDB_DISABLED", False):
+        log.warning("WANDB_DISABLED is set. Skipping wandb initialization.")
+        return
     config_checkpoint = config.checkpoint
     # Try to fetch the W&B job ID for resuming training.
     wandb_id = _read_wandb_id(config_job, config_checkpoint)

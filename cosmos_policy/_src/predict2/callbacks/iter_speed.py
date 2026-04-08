@@ -54,10 +54,12 @@ class IterSpeed(EveryN):
         iteration: int = 0,
     ) -> None:
         if self.hit_counter < self.hit_thres:
+            gn = getattr(model, "_last_grad_norm", None)
+            gn_val = gn.item() if gn is not None else float("nan")
             log.info(
                 f"Iteration {iteration}: "
                 f"Hit counter: {self.hit_counter + 1}/{self.hit_thres} | "
-                f"Loss: {loss.item():.4f} | "
+                f"Loss: {loss.item():.4f} | Grad Norm: {gn_val:.4f} | "
                 f"Time: {time.time() - self.last_hit_time:.2f}s"
             )
             self.hit_counter += 1
@@ -83,7 +85,9 @@ class IterSpeed(EveryN):
         cur_time = time.time()
         iter_speed = (cur_time - self.time) / self.every_n / self.step_size
 
-        log.info(f"{iteration} : iter_speed {iter_speed:.2f} seconds per iteration | Loss: {loss.item():.4f}")
+        gn = getattr(model, "_last_grad_norm", None)
+        gn_val = gn.item() if gn is not None else float("nan")
+        log.info(f"{iteration} : iter_speed {iter_speed:.2f} seconds per iteration | Loss: {loss.item():.4f} | Grad Norm: {gn_val:.4f}")
 
         if wandb.run:
             sample_counter = getattr(trainer, "sample_counter", iteration)

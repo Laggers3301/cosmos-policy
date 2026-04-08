@@ -24,7 +24,7 @@ import shutil
 import time
 import traceback
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
 import requests
@@ -848,6 +848,61 @@ def average_future_image_predictions(pred_dicts: List[Dict[str, Any]]) -> Dict[s
     return result
 
 
+ # Number of frames for teacher image-only input (Dream Zero requires (T+3)%4==0 and num_image_blocks>=1)
+TEACHER_IMAGE_TEXT_ONLY_NUM_FRAMES = 9
+
+
+def build_teacher_inputs_image_text_only(
+    obs: Dict[str, Any],
+    task_description: str,
+    tokenizer_fn: Callable[[str], Tuple[torch.Tensor, torch.Tensor]],
+    device: torch.device,
+    batch_size: int = 1,
+    num_frames: int = TEACHER_IMAGE_TEXT_ONLY_NUM_FRAMES,
+) -> Dict[str, torch.Tensor]:
+    """
+    Build teacher (Dream Zero) inputs for inference with **image + text only** (no action/state).
+
+    Used by online guided evaluation: at each step, the current observation image and
+    task instruction are fed to the teacher; the pipeline fills action/state with zeros.
+    """
+    primary = obs.get("primary_image")
+    if primary is None:
+        primary = obs.get("wrist_image")
+    if primary is None:
+        raise ValueError("obs must contain 'primary_image' or 'wrist_image' for teacher input.")
+    if isinstance(primary, torch.Tensor):
+        primary = primary.cpu().numpy()
+
+    primary = np.asarray(primary, dtype=np.uint8)
+    if primary.ndim == 3:
+        # (H, W, C) -> (1, T, H, W, C) by repeating frame
+        primary = np.expand_dims(primary, axis=0)  # (1, H, W, C)
+        primary = np.repeat(primary, num_frames, axis=0)  # (T, H, W, C)
+        primary = np.expand_dims(primary, axis=0)  # (1, T, H, W, C)
+
+    images = np.tile(primary, (batch_size,) + (1,) * (primary.ndim - 1))  # (B, T, H, W, C)
+    images = torch.from_numpy(images).to(device=device, dtype=torch.uint8)
+
+    input_ids, attention_mask = tokenizer_fn(task_description)
+    if isinstance(input_ids, torch.Tensor):
+        input_ids = input_ids.unsqueeze(0).expand(batch_size, -1).to(device=device)
+        attention_mask = attention_mask.unsqueeze(0).expand(batch_size, -1).to(device=device)
+    else:
+        input_ids = torch.tensor(input_ids, device=device).unsqueeze(0).expand(batch_size, -1)
+        attention_mask = torch.tensor(attention_mask, device=device).unsqueeze(0).expand(batch_size, -1)
+
+    return {
+        "images": images,
+        "text": input_ids,
+        "text_attention_mask": attention_mask,
+        # Required by DreamZero action_head even in image+text-only mode.
+        "embodiment_id": torch.zeros((batch_size,), dtype=torch.long, device=device),
+        "has_real_action": torch.zeros((batch_size,), dtype=torch.bool, device=device),
+        "_teacher_image_text_only": True,
+    }
+
+
 def get_action(
     cfg,
     model: torch.nn.Module,
@@ -884,7 +939,15 @@ def get_action(
     if randomize_seed:
         seed = secrets.randbits(32) % 256
 
-    with torch.inference_mode():
+    # Native eval can use inference_mode for speed.
+    # [MODIFIED 2026-03-24] Reason:
+    # `run_robocasa_eval` (student-only path) does not pass teacher_inputs.
+    # A previous guided-eval compatibility change referenced teacher_inputs here,
+    # causing NameError in pure student evaluation.
+    # Keep student-only eval in inference_mode by default.
+    teacher_inputs = None
+    _ctx = torch.enable_grad() if teacher_inputs is not None else torch.inference_mode()
+    with _ctx:
         # Get T5 embedding of language instruction
         if isinstance(task_label_or_embedding, str):
             text_embedding = get_t5_embedding_from_cache(task_label_or_embedding)

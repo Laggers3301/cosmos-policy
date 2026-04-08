@@ -907,6 +907,12 @@ class TimestepEmbedding(nn.Module):
         torch.nn.init.trunc_normal_(self.linear_2.weight, std=std, a=-3 * std, b=3 * std)
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
+        # [ORIGINAL CODE - kept for traceability]
+        # emb = self.linear_1(sample)
+        # [MODIFIED 2026-03-24] Reason:
+        # In eval path, sample can be float32 while linear weights are bfloat16.
+        # Align input dtype to weight dtype to avoid float vs bfloat16 matmul error.
+        sample = sample.to(self.linear_1.weight.dtype)
         emb = self.linear_1(sample)
         emb = self.activation(emb)
         emb = self.linear_2(emb)
@@ -1751,7 +1757,13 @@ class MiniTrainDIT(WeightTrainingStat):
         with amp.autocast("cuda", enabled=self.use_wan_fp32_strategy, dtype=torch.float32):
             if timesteps_B_T.ndim == 1:
                 timesteps_B_T = timesteps_B_T.unsqueeze(1)
-            t_embedding_B_T_D, adaln_lora_B_T_3D = self.t_embedder(timesteps_B_T)
+            # t_embedder has float32 params; when autocast is disabled input can be bfloat16 -> cast to float32
+            timesteps_f32 = timesteps_B_T.float()
+            t_embedding_B_T_D, adaln_lora_B_T_3D = self.t_embedder(timesteps_f32)
+            if not self.use_wan_fp32_strategy:
+                t_embedding_B_T_D = t_embedding_B_T_D.to(timesteps_B_T.dtype)
+                if adaln_lora_B_T_3D is not None:
+                    adaln_lora_B_T_3D = adaln_lora_B_T_3D.to(timesteps_B_T.dtype)
             t_embedding_B_T_D = self.t_embedding_norm(t_embedding_B_T_D)
 
         # for logging purpose

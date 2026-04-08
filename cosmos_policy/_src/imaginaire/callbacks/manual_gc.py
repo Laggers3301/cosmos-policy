@@ -46,4 +46,10 @@ class ManualGarbageCollection(EveryN):
             gc.disable()
             log.critical("Garbage collection disabled")
 
-        gc.collect(1)
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except:
+            pass

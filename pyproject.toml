@@ -61,7 +61,7 @@ dependencies = [
   "modelscope>=1.31.0",
   "multi-storage-client[boto3,google-cloud-storage,fsspec,observability-otel,msal]>=0.32.0",
   "nltk>=3.9.2",
-  "numpy",
+  "numpy>=1.26.0,<2",
   "numpydantic>=1.7.0",
   "nvidia-ml-py>=13.580.82",
   "omegaconf>=2.3.0",
@@ -226,7 +226,7 @@ conflicts = [
     {group="robocasa"},
   ]
 ]
-override-dependencies = ["numpy>=2.0.0"]
+override-dependencies = ["numpy>=1.26.0,<2"]
 
 [tool.uv.sources]
 # https://docs.astral.sh/uv/guides/integration/pytorch/#configuring-accelerators-with-optional-dependencies

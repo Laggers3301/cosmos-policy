@@ -748,6 +748,13 @@ class ALOHADataset(Dataset):
 
         t_prev = time.time()
 
+        # Clamp relative_step_idx against actual array lengths
+        for _arr_key in ("images", "left_wrist_images", "right_wrist_images", "proprio", "returns", "actions"):
+            if _arr_key in episode_data and episode_data[_arr_key] is not None:
+                _arr_len = len(episode_data[_arr_key])
+                if _arr_len > 0:
+                    relative_step_idx = min(relative_step_idx, _arr_len - 1)
+
         # If returning value function samples, randomly choose whether this sample is for
         # world model training or value function training (rollouts only)
         is_world_model_sample = False
@@ -787,6 +794,12 @@ class ALOHADataset(Dataset):
         # Calculate future frame index if needed (used by lazy JPEG and later logic)
         future_frame_idx = relative_step_idx + self.chunk_size
         max_possible_idx = episode_data["num_steps"] - 1
+        # Also clamp against actual array lengths to guard against off-by-one in stored num_steps
+        for _arr_key in ("images", "left_wrist_images", "right_wrist_images", "proprio", "returns"):
+            if _arr_key in episode_data and episode_data[_arr_key] is not None:
+                _arr_len = len(episode_data[_arr_key])
+                if _arr_len > 0:
+                    max_possible_idx = min(max_possible_idx, _arr_len - 1)
         if future_frame_idx > max_possible_idx:
             future_frame_idx = max_possible_idx
 
@@ -1069,6 +1082,12 @@ class ALOHADataset(Dataset):
         # Calculate next future frame index if needed
         next_future_frame_idx = next_relative_step_idx + self.chunk_size
         max_possible_idx = episode_data["num_steps"] - 1
+        # Also clamp against actual array lengths to guard against off-by-one
+        for _arr_key in ("images", "left_wrist_images", "right_wrist_images", "proprio", "returns"):
+            if _arr_key in episode_data and episode_data[_arr_key] is not None:
+                _arr_len = len(episode_data[_arr_key])
+                if _arr_len > 0:
+                    max_possible_idx = min(max_possible_idx, _arr_len - 1)
         if next_future_frame_idx > max_possible_idx:
             next_future_frame_idx = max_possible_idx
 

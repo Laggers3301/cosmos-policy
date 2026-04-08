@@ -61,6 +61,10 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         # since it is difficult to set up the DistributedSampler without creating two duplicates of the dataset.
         # We intentionally instantiate the dataloader on every process (rather than the rank 0 process only) to work with the DistributedSampler.
         dataset = instantiate(config.dataloader_train.dataset)
+        train_num_workers = config.dataloader_train.num_workers
+        train_persistent_workers = config.dataloader_train.persistent_workers and train_num_workers > 0
+        if config.dataloader_train.persistent_workers and train_num_workers <= 0:
+            logging.warning("Disabling train persistent_workers because num_workers=0.")
         sampler = DistributedSampler(
             dataset=dataset,
             num_replicas=parallel_state.get_data_parallel_world_size(),
@@ -73,8 +77,8 @@ def launch(config: Config, args: argparse.Namespace) -> None:
             sampler=sampler,
             batch_size=config.dataloader_train.batch_size,
             drop_last=config.dataloader_train.drop_last,
-            num_workers=config.dataloader_train.num_workers,
-            persistent_workers=config.dataloader_train.persistent_workers,
+            num_workers=train_num_workers,
+            persistent_workers=train_persistent_workers,
             pin_memory=config.dataloader_train.pin_memory,
             pin_memory_device=config.dataloader_train.pin_memory_device,
             timeout=config.dataloader_train.timeout,
@@ -84,6 +88,10 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         if config.trainer.run_validation:
             # NOTE (user): Manually instantiate the val dataloader as well
             dataset_val = instantiate(config.dataloader_val.dataset)
+            val_num_workers = config.dataloader_val.num_workers
+            val_persistent_workers = config.dataloader_val.persistent_workers and val_num_workers > 0
+            if config.dataloader_val.persistent_workers and val_num_workers <= 0:
+                logging.warning("Disabling val persistent_workers because num_workers=0.")
             sampler_val = DistributedSampler(
                 dataset=dataset_val,
                 num_replicas=parallel_state.get_data_parallel_world_size(),
@@ -96,8 +104,8 @@ def launch(config: Config, args: argparse.Namespace) -> None:
                 sampler=sampler_val,
                 batch_size=config.dataloader_val.batch_size,
                 drop_last=config.dataloader_val.drop_last,
-                num_workers=config.dataloader_val.num_workers,
-                persistent_workers=config.dataloader_val.persistent_workers,
+                num_workers=val_num_workers,
+                persistent_workers=val_persistent_workers,
                 pin_memory=config.dataloader_val.pin_memory,
                 pin_memory_device=config.dataloader_val.pin_memory_device,
                 timeout=config.dataloader_val.timeout,

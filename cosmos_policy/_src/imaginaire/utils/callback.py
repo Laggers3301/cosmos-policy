@@ -438,8 +438,9 @@ class WandBCallback(Callback):
         iteration: int = 0,
     ) -> None:  # Log the curent learning rate.
         if iteration % self.config.trainer.logging_iter == 0 and distributed.is_rank0():
-            wandb.log({"optim/lr": scheduler.get_last_lr()[0]}, step=iteration)
-            wandb.log({"optim/grad_scale": grad_scaler.get_scale()}, step=iteration)
+            if wandb.run:
+                wandb.log({"optim/lr": scheduler.get_last_lr()[0]}, step=iteration)
+                wandb.log({"optim/grad_scale": grad_scaler.get_scale()}, step=iteration)
 
     def on_training_step_end(
         self,
@@ -452,9 +453,10 @@ class WandBCallback(Callback):
         if iteration % self.config.trainer.logging_iter == 0:
             timer_results = self.trainer.training_timer.compute_average_results()
             if distributed.is_rank0():
-                wandb.log({f"timer/{key}": value for key, value in timer_results.items()}, step=iteration)
-                wandb.log({"train/loss": loss}, step=iteration)
-                wandb.log({"iteration": iteration}, step=iteration)
+                if wandb.run:
+                    wandb.log({f"timer/{key}": value for key, value in timer_results.items()}, step=iteration)
+                    wandb.log({"train/loss": loss}, step=iteration)
+                    wandb.log({"iteration": iteration}, step=iteration)
             self.trainer.training_timer.reset()
 
     def on_validation_start(
@@ -489,10 +491,12 @@ class WandBCallback(Callback):
         # Log data/stats of validation set to W&B.
         if distributed.is_rank0():
             log.info(f"Validation loss (iteration {iteration}): {loss:4f}")
-            wandb.log({"val/loss": loss}, step=iteration)
+            if wandb.run:
+                wandb.log({"val/loss": loss}, step=iteration)
 
     def on_train_end(self, model: ImaginaireModel, iteration: int = 0) -> None:
-        wandb.finish()
+        if wandb.run:
+            wandb.finish()
 
 
 class LowPrecisionCallback(Callback):
