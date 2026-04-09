@@ -79,6 +79,7 @@ def make_config() -> Config:
     c.trainer.validation_iter = 100
     c.trainer.run_validation = False
     c.trainer.callbacks = None
+    c.trainer.resume_iter_offset = 0
 
     # Call this function to register config groups for advanced overriding. the order follows the default config groups
     register_training_and_val_data()

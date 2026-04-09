@@ -85,6 +85,7 @@ def make_config_v2():
     c.trainer.validation_iter = 100
     c.trainer.run_validation = True
     c.trainer.callbacks = None
+    c.trainer.resume_iter_offset = 0
     c.checkpoint = None
 
     # Register v2 config groups for advanced overriding

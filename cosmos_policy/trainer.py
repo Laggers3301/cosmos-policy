@@ -67,6 +67,11 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         self.callbacks.on_optimizer_init_end()
         # Load the model checkpoint and get the starting iteration number.
         iteration = self.checkpointer.load(model, optimizer, scheduler, grad_scaler)
+        # Apply resume iteration offset (for warmup restart while keeping absolute checkpoint naming)
+        resume_iter_offset = self.config.trainer.resume_iter_offset
+        if resume_iter_offset:
+            log.critical(f"Applying resume_iter_offset={resume_iter_offset}: iteration {iteration} -> {iteration + resume_iter_offset}")
+            iteration += resume_iter_offset
         grad_accum_iter = 0
         log.critical(f"Distributed parallelism mode: {self.config.trainer.distributed_parallelism}")
         if self.config.trainer.distributed_parallelism == "ddp":

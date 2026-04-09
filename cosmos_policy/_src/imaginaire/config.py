@@ -394,6 +394,8 @@ class TrainerConfig:
     memory_format: torch.memory_format = torch.preserve_format
     # Gradient accumulation (update step every N iteration).
     grad_accum_iter: int = 1
+    # Resume iteration offset (added to loaded checkpoint iteration for absolute naming)
+    resume_iter_offset: int = 0
     # Straggler Detection config
     straggler_detection: StragglerDetectionConfig = attrs.field(factory=StragglerDetectionConfig)
     # Profiling config
