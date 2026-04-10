@@ -633,12 +633,14 @@ class ALOHADataset(Dataset):
         """Build a mapping from global step index to (episode index, relative index within episode).
 
         Episodes are shuffled randomly to prevent fixed filesystem order sampling.
+        NOTE (2026-04-10): Shuffle disabled for testing — causes loss to plateau at ~0.4.
+        To re-enable: uncomment the 3 lines below and remove the `random.shuffle` comment.
         """
-        # Shuffle episodes to break fixed filesystem order
-        episode_keys = list(self.data.keys())
-        random.shuffle(episode_keys)
-        shuffled_data = {k: self.data[k] for k in episode_keys}
-        result = build_demo_step_index_mapping(shuffled_data)
+        # === Episode shuffle (DISABLED) ===
+        # episode_keys = list(self.data.keys())
+        # random.shuffle(episode_keys)
+        # shuffled_data = {k: self.data[k] for k in episode_keys}
+        result = build_demo_step_index_mapping(self.data)
         self._step_to_episode_map = result["_step_to_episode_map"]
         self._total_steps = result["_total_steps"]
 
