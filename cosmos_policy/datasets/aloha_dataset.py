@@ -630,8 +630,15 @@ class ALOHADataset(Dataset):
         self._calculate_epoch_structure()
 
     def _build_step_index_mapping(self):
-        """Build a mapping from global step index to (episode index, relative index within episode)."""
-        result = build_demo_step_index_mapping(self.data)
+        """Build a mapping from global step index to (episode index, relative index within episode).
+
+        Episodes are shuffled randomly to prevent fixed filesystem order sampling.
+        """
+        # Shuffle episodes to break fixed filesystem order
+        episode_keys = list(self.data.keys())
+        random.shuffle(episode_keys)
+        shuffled_data = {k: self.data[k] for k in episode_keys}
+        result = build_demo_step_index_mapping(shuffled_data)
         self._step_to_episode_map = result["_step_to_episode_map"]
         self._total_steps = result["_total_steps"]
 

@@ -35,7 +35,8 @@ class IterSpeed(EveryN):
         save_s3_every_log_n (int): Save to S3 every n log iterations, which means save_s3_every_log_n n * every_n global iterations.
     """
 
-    def __init__(self, *args, hit_thres: int = 5, save_s3: bool = True, save_s3_every_log_n: int = 10, **kwargs):
+    def __init__(self, *args, hit_thres: int = 5, save_s3: bool = True, save_s3_every_log_n: int = 10,
+                 loss_ema_alpha: float = 0.9, **kwargs):
         super().__init__(*args, **kwargs)
         self.time = None
         self.hit_counter = 0
@@ -44,6 +45,8 @@ class IterSpeed(EveryN):
         self.save_s3_every_log_n = save_s3_every_log_n
         self.name = self.__class__.__name__
         self.last_hit_time = time.time()
+        self.loss_ema = None
+        self.loss_ema_alpha = loss_ema_alpha
 
     def on_training_step_end(
         self,
@@ -56,10 +59,16 @@ class IterSpeed(EveryN):
         if self.hit_counter < self.hit_thres:
             gn = getattr(model, "_last_grad_norm", None)
             gn_val = gn.item() if gn is not None else float("nan")
+            loss_val = loss.item()
+            # Update loss EMA
+            if self.loss_ema is None:
+                self.loss_ema = loss_val
+            else:
+                self.loss_ema = self.loss_ema_alpha * self.loss_ema + (1 - self.loss_ema_alpha) * loss_val
             log.info(
                 f"Iteration {iteration}: "
                 f"Hit counter: {self.hit_counter + 1}/{self.hit_thres} | "
-                f"Loss: {loss.item():.4f} | Grad Norm: {gn_val:.4f} | "
+                f"Loss: {loss_val:.4f} | Loss EMA: {self.loss_ema:.4f} | Grad Norm: {gn_val:.4f} | "
                 f"Time: {time.time() - self.last_hit_time:.2f}s"
             )
             self.hit_counter += 1
@@ -87,7 +96,13 @@ class IterSpeed(EveryN):
 
         gn = getattr(model, "_last_grad_norm", None)
         gn_val = gn.item() if gn is not None else float("nan")
-        log.info(f"{iteration} : iter_speed {iter_speed:.2f} seconds per iteration | Loss: {loss.item():.4f} | Grad Norm: {gn_val:.4f}")
+        loss_val = loss.item()
+        # Update loss EMA
+        if self.loss_ema is None:
+            self.loss_ema = loss_val
+        else:
+            self.loss_ema = self.loss_ema_alpha * self.loss_ema + (1 - self.loss_ema_alpha) * loss_val
+        log.info(f"{iteration} : iter_speed {iter_speed:.2f} seconds per iteration | Loss: {loss_val:.4f} | Loss EMA: {self.loss_ema:.4f} | Grad Norm: {gn_val:.4f}")
 
         if wandb.run:
             sample_counter = getattr(trainer, "sample_counter", iteration)
